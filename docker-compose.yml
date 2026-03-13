@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: flitex-overflightcharges-postgres
+    environment:
+      POSTGRES_USER: flitex
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: overflightcharges
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flitex -d overflightcharges"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - flitex-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flitex-overflightcharges-app
+    environment:
+      DATABASE_URL: postgresql://flitex:password@postgres:5432/overflightcharges
+      CORS_ORIGINS: http://localhost:4200,http://localhost:3000
+      LOG_LEVEL: INFO
+      FILES_DIRECTORY: /data
+      SQLITE_DB_PATH: /data/iata-fir-system.db
+      JS_FORMULAS_PATH: /data/formulas
+      PORT: 8000
+      WORKERS: 4
+    volumes:
+      # Mount source code for development (hot reload)
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./migrations:/app/migrations
+      - ./alembic.ini:/app/alembic.ini
+      # Mount data directory for import scripts
+      - ./data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - flitex-network
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  flitex-network:
+    driver: bridge
