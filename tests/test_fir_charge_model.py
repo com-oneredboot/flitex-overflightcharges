@@ -19,6 +19,7 @@ def test_fir_charge_columns():
     expected_columns = {
         "id",
         "calculation_id",
+        "fir_id",
         "icao_code",
         "fir_name",
         "country_code",
@@ -46,30 +47,31 @@ def test_fir_charge_indexes():
         "idx_fir_charges_calculation_id",
         "idx_fir_charges_icao_code",
         "idx_fir_charges_country_code",
+        "idx_fir_charges_fir_id",
     }
     
     assert expected_indexes.issubset(index_names)
 
 
 def test_fir_charge_foreign_keys():
-    """Test that FirCharge model has required foreign keys (Requirements 22.13, 22.14)."""
+    """Test that FirCharge model has required foreign keys (Requirements 4.1, 4.3, 22.13)."""
     mapper = inspect(FirCharge)
     
     # Get foreign key constraints
     foreign_keys = mapper.local_table.foreign_keys
     
-    # Should have 2 foreign keys
+    # Should have 2 foreign keys: calculation_id and fir_id
     assert len(foreign_keys) == 2
     
-    # Check calculation_id foreign key
+    # Check calculation_id and fir_id foreign keys
     calculation_fk = None
-    icao_code_fk = None
+    fir_id_fk = None
     
     for fk in foreign_keys:
         if fk.parent.name == "calculation_id":
             calculation_fk = fk
-        elif fk.parent.name == "icao_code":
-            icao_code_fk = fk
+        elif fk.parent.name == "fir_id":
+            fir_id_fk = fk
     
     # Verify calculation_id foreign key (Requirement 22.13)
     assert calculation_fk is not None, "Foreign key on calculation_id not found"
@@ -77,10 +79,10 @@ def test_fir_charge_foreign_keys():
     assert calculation_fk.column.name == "id"
     assert calculation_fk.ondelete == "CASCADE", "Foreign key should have CASCADE on delete"
     
-    # Verify icao_code foreign key (Requirement 22.14)
-    assert icao_code_fk is not None, "Foreign key on icao_code not found"
-    assert icao_code_fk.column.table.name == "iata_firs"
-    assert icao_code_fk.column.name == "icao_code"
+    # Verify fir_id foreign key references iata_firs.id (Requirement 4.1, 4.3)
+    assert fir_id_fk is not None, "Foreign key on fir_id not found"
+    assert fir_id_fk.column.table.name == "iata_firs"
+    assert fir_id_fk.column.name == "id"
 
 
 def test_fir_charge_nullable_constraints():
@@ -91,6 +93,7 @@ def test_fir_charge_nullable_constraints():
     required_columns = {
         "id",
         "calculation_id",
+        "fir_id",
         "icao_code",
         "fir_name",
         "country_code",
@@ -129,6 +132,9 @@ def test_fir_charge_column_types():
     
     calculation_id_col = mapper.columns["calculation_id"]
     assert "UUID" in str(calculation_id_col.type)
+    
+    fir_id_col = mapper.columns["fir_id"]
+    assert "UUID" in str(fir_id_col.type)
     
     icao_code_col = mapper.columns["icao_code"]
     assert str(icao_code_col.type) == "VARCHAR(4)"
@@ -217,6 +223,30 @@ def test_fir_charge_decimal_precision():
     charge_amount_col = mapper.columns["charge_amount"]
     assert charge_amount_col.type.precision == 12
     assert charge_amount_col.type.scale == 2
+
+
+def test_fir_charge_fir_id_index():
+    """Test that index on fir_id exists (Requirement 4.4)."""
+    mapper = inspect(FirCharge)
+    
+    fir_id_index = None
+    for idx in mapper.local_table.indexes:
+        if idx.name == "idx_fir_charges_fir_id":
+            fir_id_index = idx
+            break
+    
+    assert fir_id_index is not None, "Index idx_fir_charges_fir_id not found"
+    index_columns = [col.name for col in fir_id_index.columns]
+    assert "fir_id" in index_columns
+
+
+def test_fir_charge_icao_code_no_fk():
+    """Test that icao_code is a denormalized column with no FK (Requirement 4.2)."""
+    mapper = inspect(FirCharge)
+    
+    # icao_code should not have a foreign key
+    for fk in mapper.local_table.foreign_keys:
+        assert fk.parent.name != "icao_code", "icao_code should not have a foreign key"
 
 
 def test_fir_charge_relationships():

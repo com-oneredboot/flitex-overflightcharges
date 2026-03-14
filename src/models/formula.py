@@ -75,6 +75,18 @@ class Formula(Base):
         comment="Whether this version is currently active"
     )
     
+    # Activation/deactivation timestamps (standard versioned column set)
+    activation_date = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="System timestamp when this version became active"
+    )
+    deactivation_date = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="System timestamp when this version was deactivated"
+    )
+    
     # Audit fields
     created_at = Column(
         TIMESTAMP(timezone=True),

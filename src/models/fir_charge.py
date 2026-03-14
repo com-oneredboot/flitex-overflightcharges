@@ -12,9 +12,11 @@ class FirCharge(Base):
     SQLAlchemy model for per-FIR charge breakdown.
     
     Stores individual FIR charges for each route calculation, providing
-    detailed breakdown of overflight charges by FIR region.
+    detailed breakdown of overflight charges by FIR region. Links to
+    specific FIR versions via fir_id UUID FK; retains icao_code as
+    denormalized display column.
     
-    Validates Requirements: 6.3, 6.4, 22.10, 22.11, 22.12, 22.13, 22.14
+    Validates Requirements: 4.1, 4.2, 4.3, 4.4, 6.3, 6.4, 22.10, 22.11, 22.12, 22.13
     """
     
     __tablename__ = "fir_charges"
@@ -34,11 +36,16 @@ class FirCharge(Base):
         nullable=False,
         comment="Reference to parent route calculation (Requirement 22.13)"
     )
+    fir_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("iata_firs.id"),
+        nullable=False,
+        comment="Reference to FIR UUID (Requirement 4.1)"
+    )
     icao_code = Column(
         String(4),
-        ForeignKey("iata_firs.icao_code"),
         nullable=False,
-        comment="Reference to FIR ICAO code (Requirement 22.14)"
+        comment="Denormalized ICAO code for display (Requirement 4.2)"
     )
     
     # FIR information
@@ -73,10 +80,10 @@ class FirCharge(Base):
     )
     fir = relationship(
         "IataFir",
-        foreign_keys=[icao_code]
+        foreign_keys=[fir_id]
     )
     
-    # Indexes (Requirements 22.10, 22.11, 22.12)
+    # Indexes (Requirements 22.10, 22.11, 22.12, 4.4)
     __table_args__ = (
         # Index on calculation_id for joining with route_calculations (Requirement 22.10)
         Index("idx_fir_charges_calculation_id", "calculation_id"),
@@ -86,6 +93,9 @@ class FirCharge(Base):
         
         # Index on country_code for country-based charge analysis (Requirement 22.12)
         Index("idx_fir_charges_country_code", "country_code"),
+        
+        # Index on fir_id for FIR UUID lookups (Requirement 4.4)
+        Index("idx_fir_charges_fir_id", "fir_id"),
     )
     
     def __repr__(self) -> str:

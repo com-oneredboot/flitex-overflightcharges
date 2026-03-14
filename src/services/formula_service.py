@@ -5,6 +5,7 @@ overflight charge formulas with version history tracking and rollback capabiliti
 """
 
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -160,7 +161,8 @@ class FormulaService:
             currency=formula_data.currency,
             version_number=1,
             is_active=True,
-            created_by=created_by
+            created_by=created_by,
+            activation_date=datetime.now(timezone.utc)
         )
         
         try:
@@ -227,6 +229,7 @@ class FormulaService:
         
         # Deactivate current version
         current_formula.is_active = False
+        current_formula.deactivation_date = datetime.now(timezone.utc)
         
         # Create new version with incremented version_number
         new_version_number = current_formula.version_number + 1
@@ -239,7 +242,8 @@ class FormulaService:
             currency=formula_data.currency or current_formula.currency,
             version_number=new_version_number,
             is_active=True,
-            created_by=created_by
+            created_by=created_by,
+            activation_date=datetime.now(timezone.utc)
         )
         
         try:
@@ -383,9 +387,11 @@ class FormulaService:
         
         # Deactivate current version
         current_formula.is_active = False
+        current_formula.deactivation_date = datetime.now(timezone.utc)
         
         # Activate target version
         target_formula.is_active = True
+        target_formula.activation_date = datetime.now(timezone.utc)
         
         self.session.commit()
         self.session.refresh(target_formula)

@@ -29,6 +29,10 @@ def test_formula_columns():
         "is_active",
         "created_at",
         "created_by",
+        "activation_date",    # Added for versioning alignment
+        "deactivation_date",  # Added for versioning alignment
+        "formula_hash",
+        "formula_bytecode",
     }
     
     assert column_names == expected_columns

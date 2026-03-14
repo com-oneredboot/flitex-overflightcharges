@@ -37,10 +37,13 @@ class ServiceException(Exception):
 
 
 class FIRNotFoundException(ServiceException):
-    """Raised when FIR not found by ICAO code.
+    """Raised when no active FIR exists for a given ICAO code or target version.
     
-    This exception is raised when attempting to retrieve, update, or delete
-    a FIR record that does not exist in the database.
+    This exception is raised when attempting to retrieve, update, soft-delete,
+    or rollback a FIR record that does not exist in the database, or when a
+    target version number does not exist for a given ICAO code during rollback.
+    
+    Requirements: 5.7, 5.8, 7.7
     """
     
     status_code = 404
@@ -71,10 +74,13 @@ class FormulaNotFoundException(ServiceException):
 
 
 class DuplicateFIRException(ServiceException):
-    """Raised when attempting to create duplicate FIR.
+    """Raised when a database integrity constraint is violated for FIR records.
     
-    This exception is raised when attempting to create a FIR record
-    with an ICAO code that already exists in the database.
+    This exception is raised when a database integrity constraint is violated,
+    such as attempting to create a duplicate active FIR for the same ICAO code
+    (violating the partial unique index on active FIRs).
+    
+    Requirements: 5.7, 5.8, 7.8
     """
     
     status_code = 409

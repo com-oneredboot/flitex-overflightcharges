@@ -1,7 +1,9 @@
-"""Unit tests for FIRService CRUD operations."""
+"""Unit tests for FIRService versioned CRUD operations."""
 
 import pytest
-from unittest.mock import Mock, MagicMock
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import Mock, MagicMock, patch, PropertyMock
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -39,279 +41,244 @@ def sample_fir_data():
         "bbox_min_lat": 40.0,
         "bbox_max_lon": -73.0,
         "bbox_max_lat": 41.0,
-        "avoid_status": False
+        "avoid_status": False,
     }
 
 
 @pytest.fixture
 def sample_fir(sample_fir_data):
-    """Create a sample IataFir model instance."""
-    return IataFir(**sample_fir_data)
+    """Create a sample IataFir model instance with versioning fields."""
+    fir = IataFir(
+        **sample_fir_data,
+        version_number=1,
+        is_active=True,
+        created_by="test-user",
+        activation_date=datetime.now(timezone.utc),
+    )
+    fir.id = uuid.uuid4()
+    return fir
 
 
-class TestGetAllFirs:
-    """Tests for get_all_firs method."""
-    
-    def test_get_all_firs_returns_list(self, fir_service, mock_session, sample_fir):
-        """Test that get_all_firs returns a list of FIR records."""
-        # Arrange
+class TestGetAllActiveFirs:
+    """Tests for get_all_active_firs method."""
+
+    def test_get_all_active_firs_returns_list(self, fir_service, mock_session, sample_fir):
+        """Test that get_all_active_firs returns a list of active FIR records."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
         mock_query.all.return_value = [sample_fir]
-        
-        # Act
-        result = fir_service.get_all_firs()
-        
-        # Assert
+
+        result = fir_service.get_all_active_firs()
+
         assert isinstance(result, list)
         assert len(result) == 1
         assert result[0] == sample_fir
         mock_session.query.assert_called_once_with(IataFir)
-    
-    def test_get_all_firs_returns_empty_list(self, fir_service, mock_session):
-        """Test that get_all_firs returns empty list when no FIRs exist."""
-        # Arrange
+
+    def test_get_all_active_firs_returns_empty_list(self, fir_service, mock_session):
+        """Test that get_all_active_firs returns empty list when no active FIRs exist."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
         mock_query.all.return_value = []
-        
-        # Act
-        result = fir_service.get_all_firs()
-        
-        # Assert
+
+        result = fir_service.get_all_active_firs()
+
         assert isinstance(result, list)
         assert len(result) == 0
 
 
-class TestGetFirByCode:
-    """Tests for get_fir_by_code method."""
-    
-    def test_get_fir_by_code_returns_fir(self, fir_service, mock_session, sample_fir):
-        """Test that get_fir_by_code returns FIR when found."""
-        # Arrange
+class TestGetActiveFir:
+    """Tests for get_active_fir method."""
+
+    def test_get_active_fir_returns_fir(self, fir_service, mock_session, sample_fir):
+        """Test that get_active_fir returns FIR when found."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = sample_fir
-        
-        # Act
-        result = fir_service.get_fir_by_code("KJFK")
-        
-        # Assert
+
+        result = fir_service.get_active_fir("KJFK")
+
         assert result == sample_fir
         mock_session.query.assert_called_once_with(IataFir)
-    
-    def test_get_fir_by_code_returns_none(self, fir_service, mock_session):
-        """Test that get_fir_by_code returns None when FIR not found."""
-        # Arrange
+
+    def test_get_active_fir_returns_none(self, fir_service, mock_session):
+        """Test that get_active_fir returns None when FIR not found."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = None
-        
-        # Act
-        result = fir_service.get_fir_by_code("XXXX")
-        
-        # Assert
+
+        result = fir_service.get_active_fir("XXXX")
+
         assert result is None
 
 
 class TestCreateFir:
-    """Tests for create_fir method."""
-    
+    """Tests for create_fir method (versioned)."""
+
     def test_create_fir_success(self, fir_service, mock_session, sample_fir_data):
-        """Test successful FIR creation."""
-        # Arrange
+        """Test successful FIR creation with versioning fields."""
         fir_create = FIRCreate(**sample_fir_data)
-        
-        # Mock get_fir_by_code to return None (FIR doesn't exist)
-        mock_query = Mock()
-        mock_session.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.first.return_value = None
-        
-        # Mock the created FIR
-        created_fir = IataFir(**sample_fir_data)
-        mock_session.refresh = Mock(side_effect=lambda x: setattr(x, 'created_at', '2024-01-01'))
-        
-        # Act
-        result = fir_service.create_fir(fir_create)
-        
-        # Assert
+
+        mock_session.refresh = Mock(side_effect=lambda x: None)
+
+        result = fir_service.create_fir(fir_create, created_by="test-user")
+
         mock_session.add.assert_called_once()
         mock_session.commit.assert_called_once()
         mock_session.refresh.assert_called_once()
-        assert result.icao_code == sample_fir_data["icao_code"]
-        assert result.fir_name == sample_fir_data["fir_name"]
-    
-    def test_create_fir_duplicate_raises_exception(self, fir_service, mock_session, sample_fir_data, sample_fir):
-        """Test that creating duplicate FIR raises DuplicateFIRException."""
-        # Arrange
-        fir_create = FIRCreate(**sample_fir_data)
-        
-        # Mock get_fir_by_code to return existing FIR
-        mock_query = Mock()
-        mock_session.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.first.return_value = sample_fir
-        
-        # Act & Assert
-        with pytest.raises(DuplicateFIRException) as exc_info:
-            fir_service.create_fir(fir_create)
-        
-        assert "KJFK" in str(exc_info.value)
-        assert exc_info.value.status_code == 409
-    
-    def test_create_fir_integrity_error_raises_exception(self, fir_service, mock_session, sample_fir_data):
+        assert result.icao_code == "KJFK"
+        assert result.version_number == 1
+        assert result.is_active is True
+        assert result.created_by == "test-user"
+        assert result.activation_date is not None
+
+    def test_create_fir_integrity_error_raises_duplicate(self, fir_service, mock_session, sample_fir_data):
         """Test that IntegrityError during creation raises DuplicateFIRException."""
-        # Arrange
         fir_create = FIRCreate(**sample_fir_data)
-        
-        # Mock get_fir_by_code to return None
-        mock_query = Mock()
-        mock_session.query.return_value = mock_query
-        mock_query.filter.return_value = mock_query
-        mock_query.first.return_value = None
-        
-        # Mock commit to raise IntegrityError
+
         mock_session.commit.side_effect = IntegrityError("statement", "params", "orig")
-        
-        # Act & Assert
+
         with pytest.raises(DuplicateFIRException):
-            fir_service.create_fir(fir_create)
-        
+            fir_service.create_fir(fir_create, created_by="test-user")
+
         mock_session.rollback.assert_called_once()
 
 
 class TestUpdateFir:
-    """Tests for update_fir method."""
-    
+    """Tests for update_fir method (versioned)."""
+
     def test_update_fir_success(self, fir_service, mock_session, sample_fir):
-        """Test successful FIR update."""
-        # Arrange
+        """Test successful FIR update creates new version."""
         update_data = FIRUpdate(fir_name="Updated FIR Name", avoid_status=True)
-        
-        # Mock get_fir_by_code to return existing FIR
+
+        # Mock get_active_fir to return existing FIR
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = sample_fir
-        
-        # Act
-        result = fir_service.update_fir("KJFK", update_data)
-        
-        # Assert
+
+        mock_session.refresh = Mock(side_effect=lambda x: None)
+
+        result = fir_service.update_fir("KJFK", update_data, created_by="updater")
+
+        mock_session.add.assert_called_once()
         mock_session.commit.assert_called_once()
-        mock_session.refresh.assert_called_once()
-        assert result.fir_name == "Updated FIR Name"
-        assert result.avoid_status is True
-    
+        # Old version should be deactivated
+        assert sample_fir.is_active is False
+        assert sample_fir.deactivation_date is not None
+        # New version should have incremented version_number
+        assert result.version_number == 2
+        assert result.is_active is True
+        assert result.created_by == "updater"
+
     def test_update_fir_not_found_raises_exception(self, fir_service, mock_session):
         """Test that updating non-existent FIR raises FIRNotFoundException."""
-        # Arrange
         update_data = FIRUpdate(fir_name="Updated FIR Name")
-        
-        # Mock get_fir_by_code to return None
+
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = None
-        
-        # Act & Assert
+
         with pytest.raises(FIRNotFoundException) as exc_info:
-            fir_service.update_fir("XXXX", update_data)
-        
+            fir_service.update_fir("XXXX", update_data, created_by="updater")
+
         assert "XXXX" in str(exc_info.value)
-        assert exc_info.value.status_code == 404
-    
+
     def test_update_fir_partial_update(self, fir_service, mock_session, sample_fir):
-        """Test that partial update only changes specified fields."""
-        # Arrange
+        """Test that partial update carries forward unchanged fields."""
         original_country_name = sample_fir.country_name
         update_data = FIRUpdate(fir_name="Updated FIR Name")
-        
-        # Mock get_fir_by_code to return existing FIR
+
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = sample_fir
-        
-        # Act
-        result = fir_service.update_fir("KJFK", update_data)
-        
-        # Assert
+
+        mock_session.refresh = Mock(side_effect=lambda x: None)
+
+        result = fir_service.update_fir("KJFK", update_data, created_by="updater")
+
         assert result.fir_name == "Updated FIR Name"
-        assert result.country_name == original_country_name  # Unchanged
+        assert result.country_name == original_country_name
 
 
-class TestDeleteFir:
-    """Tests for delete_fir method."""
-    
-    def test_delete_fir_success(self, fir_service, mock_session, sample_fir):
-        """Test successful FIR deletion."""
-        # Arrange
-        # Mock get_fir_by_code to return existing FIR
+class TestSoftDeleteFir:
+    """Tests for soft_delete_fir method."""
+
+    def test_soft_delete_fir_success(self, fir_service, mock_session, sample_fir):
+        """Test successful FIR soft-delete sets is_active=False."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = sample_fir
-        
-        # Act
-        result = fir_service.delete_fir("KJFK")
-        
-        # Assert
+
+        result = fir_service.soft_delete_fir("KJFK")
+
         assert result is True
-        mock_session.delete.assert_called_once_with(sample_fir)
+        assert sample_fir.is_active is False
+        assert sample_fir.deactivation_date is not None
         mock_session.commit.assert_called_once()
-    
-    def test_delete_fir_not_found_raises_exception(self, fir_service, mock_session):
-        """Test that deleting non-existent FIR raises FIRNotFoundException."""
-        # Arrange
-        # Mock get_fir_by_code to return None
+
+    def test_soft_delete_fir_not_found_raises_exception(self, fir_service, mock_session):
+        """Test that soft-deleting non-existent FIR raises FIRNotFoundException."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
         mock_query.first.return_value = None
-        
-        # Act & Assert
+
         with pytest.raises(FIRNotFoundException) as exc_info:
-            fir_service.delete_fir("XXXX")
-        
+            fir_service.soft_delete_fir("XXXX")
+
         assert "XXXX" in str(exc_info.value)
-        assert exc_info.value.status_code == 404
 
 
-class TestGetFirsByCountry:
-    """Tests for get_firs_by_country method."""
-    
-    def test_get_firs_by_country_returns_list(self, fir_service, mock_session, sample_fir):
-        """Test that get_firs_by_country returns list of FIRs for country."""
-        # Arrange
+class TestGetFirHistory:
+    """Tests for get_fir_history method."""
+
+    def test_get_fir_history_returns_versions(self, fir_service, mock_session, sample_fir):
+        """Test that get_fir_history returns all versions."""
+        v2 = IataFir(
+            icao_code="KJFK", fir_name="Updated FIR", country_code="US",
+            country_name="United States",
+            geojson_geometry={"type": "Polygon", "coordinates": []},
+            version_number=2, is_active=True, created_by="test-user",
+        )
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
-        mock_query.all.return_value = [sample_fir]
-        
-        # Act
-        result = fir_service.get_firs_by_country("US")
-        
-        # Assert
-        assert isinstance(result, list)
-        assert len(result) == 1
-        assert result[0] == sample_fir
-        mock_session.query.assert_called_once_with(IataFir)
-    
-    def test_get_firs_by_country_returns_empty_list(self, fir_service, mock_session):
-        """Test that get_firs_by_country returns empty list when no FIRs found."""
-        # Arrange
+        mock_query.order_by.return_value = mock_query
+        mock_query.all.return_value = [v2, sample_fir]
+
+        result = fir_service.get_fir_history("KJFK")
+
+        assert len(result) == 2
+
+    def test_get_fir_history_not_found_raises_exception(self, fir_service, mock_session):
+        """Test that history for non-existent ICAO raises FIRNotFoundException."""
         mock_query = Mock()
         mock_session.query.return_value = mock_query
         mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = []
-        
-        # Act
-        result = fir_service.get_firs_by_country("XX")
-        
-        # Assert
-        assert isinstance(result, list)
-        assert len(result) == 0
+
+        with pytest.raises(FIRNotFoundException):
+            fir_service.get_fir_history("XXXX")
+
+
+class TestRollbackFir:
+    """Tests for rollback_fir method."""
+
+    def test_rollback_fir_not_found_raises_exception(self, fir_service, mock_session):
+        """Test that rollback on non-existent FIR raises FIRNotFoundException."""
+        mock_query = Mock()
+        mock_session.query.return_value = mock_query
+        mock_query.filter.return_value = mock_query
+        mock_query.first.return_value = None
+
+        with pytest.raises(FIRNotFoundException):
+            fir_service.rollback_fir("XXXX", 1)
