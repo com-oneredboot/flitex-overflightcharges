@@ -1,7 +1,7 @@
 """FirCharge SQLAlchemy model for per-FIR charge breakdown."""
 
 from sqlalchemy import Column, String, DECIMAL, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 import uuid
 from src.database import Base
@@ -72,15 +72,71 @@ class FirCharge(Base):
         comment="ISO 4217 currency code"
     )
     
+    # Distance columns (Requirements 8.3, 9.3)
+    segment_distance_km = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Segment distance through FIR in km (Requirement 8.3)",
+    )
+    segment_distance_nm = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Segment distance through FIR in nm (Requirement 8.3)",
+    )
+    gc_entry_exit_distance_km = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Great circle entry/exit distance in km (Requirement 9.3)",
+    )
+    gc_entry_exit_distance_nm = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Great circle entry/exit distance in nm (Requirement 9.3)",
+    )
+
+    # Distance method and charge type
+    distance_method = Column(
+        String(20),
+        nullable=True,
+        comment="Distance method used for charge: segment or gc_entry_exit",
+    )
+    charge_type = Column(
+        String(20),
+        nullable=True,
+        server_default="overflight",
+        comment="Charge type, default overflight (Requirement 21.5)",
+    )
+
+    # Bilateral exemption (Requirement 21.1)
+    bilateral_exemption = Column(
+        JSONB,
+        nullable=True,
+        comment="Nullable JSONB for future bilateral agreements (Requirement 21.1)",
+    )
+
+    # Session linkage FK (Requirement 11.4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "calculations.overflight_calculation_sessions.calculation_id",
+        ),
+        nullable=True,
+        comment="FK to calculations.overflight_calculation_sessions",
+    )
+
     # Relationships
     calculation = relationship(
         "RouteCalculation",
         backref="fir_charges",
-        foreign_keys=[calculation_id]
+        foreign_keys=[calculation_id],
     )
     fir = relationship(
         "IataFir",
-        foreign_keys=[fir_id]
+        foreign_keys=[fir_id],
+    )
+    session = relationship(
+        "OverflightCalculationSession",
+        foreign_keys=[session_id],
     )
     
     # Indexes (Requirements 22.10, 22.11, 22.12, 4.4)
@@ -96,6 +152,9 @@ class FirCharge(Base):
         
         # Index on fir_id for FIR UUID lookups (Requirement 4.4)
         Index("idx_fir_charges_fir_id", "fir_id"),
+
+        # Index on session_id for session-based lookups (Requirement 11.4)
+        Index("idx_fir_charges_session_id", "session_id"),
     )
     
     def __repr__(self) -> str:

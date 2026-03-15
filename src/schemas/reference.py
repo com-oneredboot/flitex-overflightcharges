@@ -3,11 +3,17 @@
 Defines request/response schemas for airport search, aircraft search,
 and route validation endpoints.
 
-Validates Requirements: 2.1, 2.3, 3.2, 3.3
+Validates Requirements: 2.1, 2.3, 3.2, 3.3, 8.1, 9.1, 9.3, 21.5
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
+
+
+def _to_camel(name: str) -> str:
+    """Convert snake_case field name to camelCase for JSON serialization."""
+    parts = name.split("_")
+    return parts[0] + "".join(word.capitalize() for word in parts[1:])
 
 
 class AirportResponse(BaseModel):
@@ -107,7 +113,13 @@ class ResolvedWaypoint(BaseModel):
 class FIRCrossing(BaseModel):
     """A Flight Information Region crossed by the validated route.
 
-    Validates Requirements: 3.5
+    Extended with distance fields from the FIR intersection engine:
+    segment distance (actual path through FIR), great circle entry/exit
+    distance, entry/exit points, distance method, and charge type.
+
+    Supports camelCase serialization for JSON API responses via alias_generator.
+
+    Validates Requirements: 3.5, 8.1, 9.1, 9.3, 21.5
     """
 
     icao_code: str = Field(
@@ -121,6 +133,44 @@ class FIRCrossing(BaseModel):
     country: Optional[str] = Field(
         None,
         description="Country of the FIR",
+    )
+    segment_distance_km: Optional[float] = Field(
+        default=None,
+        description="Segment distance through FIR in kilometers (actual path length)",
+    )
+    segment_distance_nm: Optional[float] = Field(
+        default=None,
+        description="Segment distance through FIR in nautical miles (actual path length)",
+    )
+    gc_entry_exit_distance_km: Optional[float] = Field(
+        default=None,
+        description="Great circle distance between entry and exit points in kilometers",
+    )
+    gc_entry_exit_distance_nm: Optional[float] = Field(
+        default=None,
+        description="Great circle distance between entry and exit points in nautical miles",
+    )
+    entry_point: Optional[dict] = Field(
+        default=None,
+        description="Entry point into FIR as {lat, lon}",
+    )
+    exit_point: Optional[dict] = Field(
+        default=None,
+        description="Exit point from FIR as {lat, lon}",
+    )
+    distance_method: Optional[str] = Field(
+        default=None,
+        description="Distance method used for charge calculation: 'segment' or 'gc_entry_exit'",
+    )
+    charge_type: Optional[str] = Field(
+        default="overflight",
+        description="Charge type: 'overflight' (default), extensible for future types",
+    )
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=_to_camel,
+        populate_by_name=True,
     )
 
 

@@ -1,7 +1,8 @@
 """RouteCalculation SQLAlchemy model for calculation audit trail."""
 
-from sqlalchemy import Column, String, Text, DECIMAL, TIMESTAMP, func, Index
+from sqlalchemy import Column, String, Text, Integer, Date, DECIMAL, TIMESTAMP, ForeignKey, func, Index
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 import uuid
 from src.database import Base
 
@@ -72,7 +73,52 @@ class RouteCalculation(Base):
         TIMESTAMP(timezone=True),
         server_default=func.now(),
         nullable=False,
-        comment="When the calculation was performed"
+        comment="When the calculation was performed",
+    )
+
+    # Session linkage FK (Requirement 11.4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "calculations.overflight_calculation_sessions.calculation_id",
+        ),
+        nullable=True,
+        comment="FK to calculations.overflight_calculation_sessions",
+    )
+
+    # Flight info columns
+    flight_number = Column(
+        String(20),
+        nullable=True,
+        comment="Flight number",
+    )
+    flight_date = Column(
+        Date,
+        nullable=True,
+        comment="Flight date",
+    )
+
+    # Distance columns
+    total_distance_km = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Total route distance in km",
+    )
+    total_distance_nm = Column(
+        DECIMAL(12, 4),
+        nullable=True,
+        comment="Total route distance in nm",
+    )
+    fir_count = Column(
+        Integer,
+        nullable=True,
+        comment="Number of FIRs crossed",
+    )
+
+    # Relationships
+    session = relationship(
+        "OverflightCalculationSession",
+        foreign_keys=[session_id],
     )
     
     # Indexes (Requirements 22.7, 22.8, 22.9)
@@ -85,6 +131,9 @@ class RouteCalculation(Base):
         
         # Index on destination for destination-based lookups (Requirement 22.9)
         Index("idx_route_calculations_destination", "destination"),
+
+        # Index on session_id for session-based lookups (Requirement 11.4)
+        Index("idx_route_calculations_session_id", "session_id"),
     )
     
     def __repr__(self) -> str:

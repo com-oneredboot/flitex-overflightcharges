@@ -79,7 +79,8 @@ class TestRouteValidationEndpoint:
         assert data["waypoints"][0]["source_table"] == "airports"
         assert data["waypoints"][1]["identifier"] == "CYYZ"
         assert len(data["fir_crossings"]) == 1
-        assert data["fir_crossings"][0]["icao_code"] == "KZNY"
+        assert data["fir_crossings"][0]["icaoCode"] == "KZNY"
+        assert data["fir_crossings"][0]["chargeType"] == "overflight"
         assert data["unresolved"] == []
 
     def test_partial_resolution(self, client, mock_db):
@@ -256,8 +257,9 @@ class TestRouteValidationEndpoint:
         assert isinstance(wp["source_table"], str)
 
         fir = data["fir_crossings"][0]
-        assert isinstance(fir["icao_code"], str)
-        assert isinstance(fir["fir_name"], str)
+        assert isinstance(fir["icaoCode"], str)
+        assert isinstance(fir["firName"], str)
+        assert fir["chargeType"] == "overflight"
 
     def test_pydantic_validation_rejects_missing_route_string(self, client, mock_db):
         """Missing route_string in request body → 422 (Pydantic validation)."""

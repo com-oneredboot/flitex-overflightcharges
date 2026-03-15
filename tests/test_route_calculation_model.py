@@ -26,6 +26,15 @@ def test_route_calculation_columns():
         "total_cost",
         "currency",
         "calculation_timestamp",
+        # Session linkage (Requirement 11.4)
+        "session_id",
+        # Flight info columns
+        "flight_number",
+        "flight_date",
+        # Distance columns
+        "total_distance_km",
+        "total_distance_nm",
+        "fir_count",
     }
     
     assert column_names == expected_columns

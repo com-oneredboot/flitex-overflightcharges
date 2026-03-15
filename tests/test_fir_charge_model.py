@@ -25,6 +25,18 @@ def test_fir_charge_columns():
         "country_code",
         "charge_amount",
         "currency",
+        # Distance columns (Requirements 8.3, 9.3)
+        "segment_distance_km",
+        "segment_distance_nm",
+        "gc_entry_exit_distance_km",
+        "gc_entry_exit_distance_nm",
+        # Distance method and charge type
+        "distance_method",
+        "charge_type",
+        # Bilateral exemption (Requirement 21.1)
+        "bilateral_exemption",
+        # Session linkage (Requirement 11.4)
+        "session_id",
     }
     
     assert column_names == expected_columns
@@ -54,24 +66,27 @@ def test_fir_charge_indexes():
 
 
 def test_fir_charge_foreign_keys():
-    """Test that FirCharge model has required foreign keys (Requirements 4.1, 4.3, 22.13)."""
+    """Test that FirCharge model has required foreign keys (Requirements 4.1, 4.3, 11.4, 22.13)."""
     mapper = inspect(FirCharge)
     
     # Get foreign key constraints
     foreign_keys = mapper.local_table.foreign_keys
     
-    # Should have 2 foreign keys: calculation_id and fir_id
-    assert len(foreign_keys) == 2
+    # Should have 3 foreign keys: calculation_id, fir_id, session_id
+    assert len(foreign_keys) == 3
     
-    # Check calculation_id and fir_id foreign keys
+    # Check calculation_id, fir_id, and session_id foreign keys
     calculation_fk = None
     fir_id_fk = None
+    session_fk = None
     
     for fk in foreign_keys:
         if fk.parent.name == "calculation_id":
             calculation_fk = fk
         elif fk.parent.name == "fir_id":
             fir_id_fk = fk
+        elif fk.parent.name == "session_id":
+            session_fk = fk
     
     # Verify calculation_id foreign key (Requirement 22.13)
     assert calculation_fk is not None, "Foreign key on calculation_id not found"
@@ -83,6 +98,11 @@ def test_fir_charge_foreign_keys():
     assert fir_id_fk is not None, "Foreign key on fir_id not found"
     assert fir_id_fk.column.table.name == "iata_firs"
     assert fir_id_fk.column.name == "id"
+    
+    # Verify session_id foreign key (Requirement 11.4)
+    assert session_fk is not None, "Foreign key on session_id not found"
+    assert session_fk.column.table.name == "overflight_calculation_sessions"
+    assert session_fk.column.name == "calculation_id"
 
 
 def test_fir_charge_nullable_constraints():
