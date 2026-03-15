@@ -229,13 +229,23 @@ class TestFIRChargeBreakdown:
             fir_name="New York FIR",
             country_code="US",
             charge_amount=Decimal("125.50"),
-            currency="USD"
+            currency="USD",
+            formula_code="US_STANDARD",
+            formula_version=1,
+            formula_description="United States standard formula",
+            formula_logic="mtow_kg * 0.5 + distance_km * 2.0",
+            effective_date="2024-01-01"
         )
         assert breakdown.icao_code == "KZNY"
         assert breakdown.fir_name == "New York FIR"
         assert breakdown.country_code == "US"
         assert breakdown.charge_amount == Decimal("125.50")
         assert breakdown.currency == "USD"
+        assert breakdown.formula_code == "US_STANDARD"
+        assert breakdown.formula_version == 1
+        assert breakdown.formula_description == "United States standard formula"
+        assert breakdown.formula_logic == "mtow_kg * 0.5 + distance_km * 2.0"
+        assert breakdown.effective_date == "2024-01-01"
     
     def test_icao_code_required(self):
         """Test that icao_code is required."""
@@ -244,7 +254,12 @@ class TestFIRChargeBreakdown:
                 fir_name="New York FIR",
                 country_code="US",
                 charge_amount=Decimal("125.50"),
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="US formula",
+                formula_logic="mtow_kg * 0.5",
+                effective_date="2024-01-01"
             )
         assert "icao_code" in str(exc_info.value)
     
@@ -255,7 +270,12 @@ class TestFIRChargeBreakdown:
                 icao_code="KZNY",
                 country_code="US",
                 charge_amount=Decimal("125.50"),
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="US formula",
+                formula_logic="mtow_kg * 0.5",
+                effective_date="2024-01-01"
             )
         assert "fir_name" in str(exc_info.value)
     
@@ -266,7 +286,12 @@ class TestFIRChargeBreakdown:
                 icao_code="KZNY",
                 fir_name="New York FIR",
                 charge_amount=Decimal("125.50"),
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="US formula",
+                formula_logic="mtow_kg * 0.5",
+                effective_date="2024-01-01"
             )
         assert "country_code" in str(exc_info.value)
     
@@ -277,7 +302,12 @@ class TestFIRChargeBreakdown:
                 icao_code="KZNY",
                 fir_name="New York FIR",
                 country_code="US",
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="US formula",
+                formula_logic="mtow_kg * 0.5",
+                effective_date="2024-01-01"
             )
         assert "charge_amount" in str(exc_info.value)
     
@@ -288,7 +318,12 @@ class TestFIRChargeBreakdown:
                 icao_code="KZNY",
                 fir_name="New York FIR",
                 country_code="US",
-                charge_amount=Decimal("125.50")
+                charge_amount=Decimal("125.50"),
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="US formula",
+                formula_logic="mtow_kg * 0.5",
+                effective_date="2024-01-01"
             )
         assert "currency" in str(exc_info.value)
 
@@ -305,14 +340,24 @@ class TestRouteCostResponse:
                 fir_name="New York FIR",
                 country_code="US",
                 charge_amount=Decimal("125.50"),
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="United States standard formula",
+                formula_logic="mtow_kg * 0.5 + distance_km * 2.0",
+                effective_date="2024-01-01"
             ),
             FIRChargeBreakdown(
                 icao_code="CZUL",
                 fir_name="Montreal FIR",
                 country_code="CA",
                 charge_amount=Decimal("98.75"),
-                currency="CAD"
+                currency="CAD",
+                formula_code="CA_STANDARD",
+                formula_version=1,
+                formula_description="Canada standard formula",
+                formula_logic="mtow_kg * 0.3",
+                effective_date="2024-01-01"
             )
         ]
         response = RouteCostResponse(

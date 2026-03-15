@@ -73,7 +73,12 @@ def sample_route_cost_response():
                 fir_name="New York FIR",
                 country_code="US",
                 charge_amount=Decimal("25200.00"),
-                currency="USD"
+                currency="USD",
+                formula_code="US_STANDARD",
+                formula_version=1,
+                formula_description="United States standard formula",
+                formula_logic="mtow_kg * 0.5 + distance_km * 2.0",
+                effective_date="2024-01-01"
             )
         ]
     )
@@ -214,14 +219,24 @@ class TestCalculateRouteCost:
                     fir_name="New York FIR",
                     country_code="US",
                     charge_amount=Decimal("40000.00"),
-                    currency="USD"
+                    currency="USD",
+                    formula_code="US_STANDARD",
+                    formula_version=1,
+                    formula_description="United States standard formula",
+                    formula_logic="mtow_kg * 0.5",
+                    effective_date="2024-01-01"
                 ),
                 FIRChargeBreakdown(
                     icao_code="CZYZ",
                     fir_name="Toronto FIR",
                     country_code="CA",
                     charge_amount=Decimal("24000.00"),
-                    currency="USD"
+                    currency="USD",
+                    formula_code="CA_STANDARD",
+                    formula_version=1,
+                    formula_description="Canada standard formula",
+                    formula_logic="mtow_kg * 0.3",
+                    effective_date="2024-01-01"
                 )
             ]
         )

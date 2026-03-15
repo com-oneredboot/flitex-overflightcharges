@@ -8,6 +8,7 @@ Validates Requirements: 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.10, 6.1, 6.2, 6.3, 6.4
 """
 
 import logging
+import math
 from typing import List
 from decimal import Decimal
 from sqlalchemy.orm import Session
@@ -19,7 +20,7 @@ from src.models.route_calculation import RouteCalculation
 from src.models.fir_charge import FirCharge
 from src.models.iata_fir import IataFir
 from src.models.formula import Formula
-from src.schemas.route_cost import RouteCostResponse, FIRChargeBreakdown
+from src.schemas.route_cost import RouteCostResponse, FIRChargeBreakdown, FIRWarning
 from src.exceptions import ParsingException, ValidationException
 
 
@@ -96,7 +97,7 @@ class CostCalculator:
         
         # Step 1: Parse route string into waypoints (Requirement 5.3)
         try:
-            waypoints = self.route_parser.parse_route(route_string)
+            waypoints = self.route_parser.parse_route(route_string, self.session)
             logger.debug(
                 f"Parsed route into {len(waypoints)} waypoints",
                 extra={"waypoints_count": len(waypoints)}
@@ -108,15 +109,9 @@ class CostCalculator:
             )
             raise
         
-        # Step 2: Get all FIRs from database
-        all_firs = self.fir_service.get_all_firs()
-        logger.debug(
-            f"Retrieved {len(all_firs)} FIRs from database",
-            extra={"firs_count": len(all_firs)}
-        )
-        
-        # Step 3: Identify FIR crossings (Requirement 5.4)
-        fir_codes = self.route_parser.identify_fir_crossings(waypoints, all_firs)
+        # Step 2 & 3: Identify FIR crossings via PostGIS spatial query (Requirement 5.4)
+        fir_crossings = self.route_parser.identify_fir_crossings_db(waypoints, self.session)
+        fir_codes = [fc.icao_code for fc in fir_crossings]
         logger.info(
             f"Identified {len(fir_codes)} FIR crossings",
             extra={"fir_crossings": fir_codes}
@@ -129,7 +124,7 @@ class CostCalculator:
         
         for fir_code in fir_codes:
             # Get FIR details
-            fir = self.fir_service.get_fir_by_code(fir_code)
+            fir = self.fir_service.get_active_fir(fir_code)
             if not fir:
                 logger.warning(
                     f"FIR not found for code {fir_code}, skipping",
@@ -141,14 +136,27 @@ class CostCalculator:
             formula = self.formula_service.get_active_formula(fir.country_code)
             
             if not formula:
-                # Log warning and exclude from total (Requirement 5.10)
+                # Include FIR with warning instead of silently skipping (Requirement 2.3)
                 logger.warning(
-                    f"No active formula found for country {fir.country_code}, excluding FIR {fir_code} from calculation",
+                    f"No active formula found for country {fir.country_code}, including FIR {fir_code} with warning",
                     extra={
                         "fir_code": fir_code,
                         "country_code": fir.country_code
                     }
                 )
+                fir_breakdown.append(FIRChargeBreakdown(
+                    icao_code=fir.icao_code,
+                    fir_id=fir.id,
+                    fir_name=fir.fir_name,
+                    country_code=fir.country_code,
+                    charge_amount=Decimal("0"),
+                    currency="N/A",
+                    formula_code="NONE",
+                    warning=FIRWarning(
+                        message=f"No active formula for country {fir.country_code}",
+                        detail=f"FIR: {fir_code}, Country: {fir.country_code} — no active formula found in database"
+                    )
+                ))
                 continue
             
             # Calculate distance through FIR (simplified - using fixed distance)
@@ -165,10 +173,16 @@ class CostCalculator:
                 # Add to breakdown
                 fir_breakdown.append(FIRChargeBreakdown(
                     icao_code=fir.icao_code,
+                    fir_id=fir.id,
                     fir_name=fir.fir_name,
                     country_code=fir.country_code,
                     charge_amount=charge_amount,
-                    currency=currency
+                    currency=currency,
+                    formula_code=formula.formula_code,
+                    formula_version=formula.version_number,
+                    formula_description=formula.description,
+                    formula_logic=formula.formula_logic,
+                    effective_date=str(formula.effective_date)
                 ))
                 
                 # Add to total (Requirement 5.7)
@@ -192,7 +206,25 @@ class CostCalculator:
                         "error": str(e)
                     }
                 )
-                # Continue with other FIRs
+                # Include FIR with warning instead of silently skipping (Requirement 2.2)
+                error_type = type(e).__name__
+                fir_breakdown.append(FIRChargeBreakdown(
+                    icao_code=fir.icao_code,
+                    fir_id=fir.id,
+                    fir_name=fir.fir_name,
+                    country_code=fir.country_code,
+                    charge_amount=Decimal("0"),
+                    currency=formula.currency,
+                    formula_code=formula.formula_code,
+                    formula_version=formula.version_number,
+                    formula_description=formula.description,
+                    formula_logic=formula.formula_logic,
+                    effective_date=str(formula.effective_date) if formula.effective_date else None,
+                    warning=FIRWarning(
+                        message=f"Formula execution failed for {fir_code}",
+                        detail=f"FIR: {fir_code}, Country: {fir.country_code}, Formula: {formula.formula_code}, Error: {error_type}: {str(e)}"
+                    )
+                ))
                 continue
         
         # Step 5: Store calculation record (Requirement 6.1, 6.2)
@@ -213,6 +245,7 @@ class CostCalculator:
         for breakdown in fir_breakdown:
             fir_charge = FirCharge(
                 calculation_id=calculation_record.id,
+                fir_id=breakdown.fir_id,
                 icao_code=breakdown.icao_code,
                 fir_name=breakdown.fir_name,
                 country_code=breakdown.country_code,
@@ -250,24 +283,29 @@ class CostCalculator:
         distance_km: float
     ) -> Decimal:
         """Apply country formula to calculate charge.
-        
+
         Executes the Python formula logic with mtow_kg and distance_km
         as input variables. The formula should return a numeric value
         representing the charge amount.
-        
+
+        Supports two formula formats:
+        - Single-line expressions: evaluated via eval() (e.g., "mtow_kg * 0.5 + distance_km * 2.0")
+        - Multi-line function definitions: executed via exec() then calling calculate()
+          (e.g., "def calculate(distance, weight, context):\\n    return distance * weight * 0.01")
+
         Args:
             formula: Formula object with Python logic
             mtow_kg: Maximum takeoff weight in kilograms
             distance_km: Distance through FIR in kilometers
-        
+
         Returns:
             Calculated charge amount as Decimal
-        
+
         Raises:
             ValidationException: If formula execution fails
-        
-        Validates: Requirement 5.6
-        
+
+        Validates: Requirement 5.6, 2.1, 3.1
+
         Example:
             >>> formula = Formula(formula_logic="mtow_kg * 0.5 + distance_km * 2.0")
             >>> charge = calculator.apply_formula(formula, 50000.0, 100.0)
@@ -275,24 +313,50 @@ class CostCalculator:
             Decimal('25200.00')
         """
         try:
-            # Create execution context with available variables
-            context = {
-                "mtow_kg": mtow_kg,
-                "distance_km": distance_km,
-                # Add common math functions for formula use
-                "min": min,
-                "max": max,
-                "abs": abs,
-                "round": round,
-            }
-            
-            # Execute formula logic
-            # The formula should be a Python expression that evaluates to a number
-            result = eval(formula.formula_logic, {"__builtins__": {}}, context)
-            
+            is_multiline = "def " in formula.formula_logic or "\n" in formula.formula_logic
+
+            if is_multiline:
+                # Multi-line formula: use exec() to define the function,
+                # then call calculate() — mirrors FormulaExecutor.execute_formula() pattern
+                exec_globals = {
+                    "__builtins__": {},
+                    "sqrt": math.sqrt,
+                    "pow": pow,
+                    "abs": abs,
+                    "min": min,
+                    "max": max,
+                    "round": round,
+                }
+                exec_locals = {}
+                exec(formula.formula_logic, exec_globals, exec_locals)
+
+                calculate_func = exec_locals["calculate"]
+                # Formulas define calculate(distance, weight, context)
+                # Pass mtow_kg as distance, distance_km as weight, and an empty context dict
+                result = calculate_func(mtow_kg, distance_km, {})
+
+                # Multi-line formulas return a dict {'cost': ..., 'currency': ..., 'usd_cost': ...}
+                # Extract the numeric cost value from the dict
+                if isinstance(result, dict):
+                    result = result.get("cost", 0)
+            else:
+                # Single-line expression: keep existing eval() path unchanged (preservation)
+                context = {
+                    "mtow_kg": mtow_kg,
+                    "distance_km": distance_km,
+                    # Add common math functions for formula use
+                    "sqrt": math.sqrt,
+                    "pow": pow,
+                    "min": min,
+                    "max": max,
+                    "abs": abs,
+                    "round": round,
+                }
+                result = eval(formula.formula_logic, {"__builtins__": {}}, context)
+
             # Convert result to Decimal for precision
             charge_amount = Decimal(str(result))
-            
+
             # Ensure non-negative charge
             if charge_amount < 0:
                 logger.warning(
@@ -303,9 +367,9 @@ class CostCalculator:
                     }
                 )
                 charge_amount = Decimal("0.00")
-            
+
             return charge_amount
-        
+
         except Exception as e:
             raise ValidationException(
                 message=f"Formula execution failed: {str(e)}",

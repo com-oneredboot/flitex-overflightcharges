@@ -13,6 +13,14 @@ from src.schemas.monitoring import (
     CalculationSummary,
     MetricsResponse
 )
+from src.schemas.reference import (
+    AirportResponse,
+    AircraftResponse,
+    RouteValidationRequest,
+    ResolvedWaypoint,
+    FIRCrossing,
+    RouteValidationResponse,
+)
 
 __all__ = [
     "FIRBase",
@@ -27,4 +35,10 @@ __all__ = [
     "HealthResponse",
     "CalculationSummary",
     "MetricsResponse",
+    "AirportResponse",
+    "AircraftResponse",
+    "RouteValidationRequest",
+    "ResolvedWaypoint",
+    "FIRCrossing",
+    "RouteValidationResponse",
 ]

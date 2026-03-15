@@ -10,6 +10,7 @@ import logging
 import time
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from src.database import get_db
@@ -121,7 +122,7 @@ async def calculate_route_cost(
         
         # Log unexpected error
         logger.error(
-            f"Failed to calculate route cost: {str(e)}",
+            f"Unexpected error in route cost calculation: {str(e)}",
             extra={
                 "method": "POST",
                 "path": "/api/route-costs",
@@ -132,4 +133,11 @@ async def calculate_route_cost(
             },
             exc_info=True
         )
-        raise
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "detail": "An unexpected error occurred during route cost calculation",
+                "status_code": 500
+            }
+        )
