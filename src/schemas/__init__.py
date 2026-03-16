@@ -21,6 +21,20 @@ from src.schemas.reference import (
     FIRCrossing,
     RouteValidationResponse,
 )
+from src.schemas.flown_search import (
+    FlownSearchRequest,
+    FlownRecordResponse,
+    FlownSearchResponse,
+)
+from src.schemas.summary_review import (
+    Finding,
+    AIReviewResult,
+    MultiPersonaResult,
+    GenerateReviewRequest,
+    GenerateReviewResponse,
+    ChatRequest,
+    ChatResponse,
+)
 
 __all__ = [
     "FIRBase",
@@ -41,4 +55,14 @@ __all__ = [
     "ResolvedWaypoint",
     "FIRCrossing",
     "RouteValidationResponse",
+    "FlownSearchRequest",
+    "FlownRecordResponse",
+    "FlownSearchResponse",
+    "Finding",
+    "AIReviewResult",
+    "MultiPersonaResult",
+    "GenerateReviewRequest",
+    "GenerateReviewResponse",
+    "ChatRequest",
+    "ChatResponse",
 ]

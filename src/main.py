@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from src.logging_config import configure_logging
 from src.database import get_db, engine
 from src.exceptions import ServiceException
-from src.routes import fir_routes, formula_routes, freshness_routes, route_cost_routes, monitoring_routes, reference_routes, route_validation_routes
+from src.routes import fir_routes, flown_search_routes, formula_routes, freshness_routes, invoice_search_routes, route_cost_routes, monitoring_routes, reference_routes, route_validation_routes, summary_review_routes
 
 # Configure structured logging
 configure_logging()
@@ -264,12 +264,15 @@ app.add_middleware(
 
 # Register routers
 app.include_router(fir_routes.router)
+app.include_router(flown_search_routes.router)
 app.include_router(formula_routes.router)
 app.include_router(freshness_routes.router)
+app.include_router(invoice_search_routes.router)
 app.include_router(route_cost_routes.router)
 app.include_router(monitoring_routes.router)
 app.include_router(reference_routes.router)
 app.include_router(route_validation_routes.router)
+app.include_router(summary_review_routes.router)
 
 
 # Exception handlers (Task 12.3)

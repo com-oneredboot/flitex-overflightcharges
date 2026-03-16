@@ -7,6 +7,8 @@ from src.models.fir_charge import FirCharge
 from src.models.token_action_reason import TokenActionReason
 from src.models.overflight_calculation_session import OverflightCalculationSession
 from src.models.overflight_charges_anomaly import OverflightChargesAnomaly
+from src.models.flights_flown_data import FlightsFlownData
+from src.models.invoice import Invoice, FIREntry
 from src.models.reference import (
     ReferenceAirport,
     ReferenceAircraft,
@@ -16,6 +18,8 @@ from src.models.reference import (
     ReferenceChargesNDB,
     ReferenceFIRBoundary,
 )
+from src.models.ai_review_session import AIReviewSession
+from src.models.ai_chat_message import AIChatMessage
 
 __all__ = [
     "IataFir",
@@ -25,6 +29,9 @@ __all__ = [
     "TokenActionReason",
     "OverflightCalculationSession",
     "OverflightChargesAnomaly",
+    "FlightsFlownData",
+    "Invoice",
+    "FIREntry",
     "ReferenceAirport",
     "ReferenceAircraft",
     "ReferenceNavWaypoint",
@@ -32,4 +39,6 @@ __all__ = [
     "ReferenceChargesVOR",
     "ReferenceChargesNDB",
     "ReferenceFIRBoundary",
+    "AIReviewSession",
+    "AIChatMessage",
 ]
