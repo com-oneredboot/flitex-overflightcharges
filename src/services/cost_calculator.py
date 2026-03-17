@@ -10,10 +10,11 @@ Validates Requirements: 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.10, 6.1, 6.2, 6.3, 6.4
 import logging
 import math
 from typing import List
+from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
 
-from src.services.route_parser import RouteParser, Waypoint
+from src.services.route_parser import RouteParser, Waypoint, TokenResolutionResult
 from src.services.fir_service import FIRService
 from src.services.formula_service import FormulaService
 from src.models.route_calculation import RouteCalculation
@@ -97,7 +98,10 @@ class CostCalculator:
         
         # Step 1: Parse route string into waypoints (Requirement 5.3)
         try:
-            waypoints = self.route_parser.parse_route(route_string, self.session)
+            token_result = self.route_parser.parse_route(
+                route_string, origin, destination, date.today(), self.session
+            )
+            waypoints = token_result.resolved_waypoints
             logger.debug(
                 f"Parsed route into {len(waypoints)} waypoints",
                 extra={"waypoints_count": len(waypoints)}

@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "2d917edc5e5a928b00303a1f972b5406e0c30aef57c592b823c59fea02a0c29e"
+            "sha256": "2f3d770e9377e5690fbfdeb5e4124f329c51436c609c5fe37573ce84e2af00c9"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -64,6 +64,14 @@
             ],
             "markers": "python_version >= '3.10'",
             "version": "==8.3.1"
+        },
+        "et-xmlfile": {
+            "hashes": [
+                "sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+                "sha256:dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==2.0.0"
         },
         "fastapi": {
             "hashes": [
@@ -395,6 +403,15 @@
             "markers": "python_version >= '3.11'",
             "version": "==2.4.3"
         },
+        "openpyxl": {
+            "hashes": [
+                "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+                "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8'",
+            "version": "==3.1.5"
+        },
         "psycopg2-binary": {
             "hashes": [
                 "sha256:00ce1830d971f43b667abe4a56e42c1e2d594b32da4802e44a73bacacb25535f",
@@ -613,6 +630,15 @@
             "index": "pypi",
             "markers": "python_version >= '3.10'",
             "version": "==1.2.2"
+        },
+        "python-multipart": {
+            "hashes": [
+                "sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155",
+                "sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.10'",
+            "version": "==0.0.22"
         },
         "pyyaml": {
             "hashes": [
@@ -873,11 +899,11 @@
                 "standard"
             ],
             "hashes": [
-                "sha256:09d11cf7008da33113824ee5a1c6422d89fbc2ff476540d69a34c87fab8b571a",
-                "sha256:29e35b1d2c36a04b9e180d4007ede3bcb32a85fbdfd6c6aeb3f26839de088187"
+                "sha256:96c30f5c7abe6f74ae8900a70e92b85ad6613b745d4879eb9b16ccad15645359",
+                "sha256:9b1f190ce15a2dd22e7758651d9b6d12df09a13d51ba5bf4fc33c383a48e1775"
             ],
             "markers": "python_version >= '3.10'",
-            "version": "==0.41.0"
+            "version": "==0.42.0"
         },
         "uvloop": {
             "hashes": [

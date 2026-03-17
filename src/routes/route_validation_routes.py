@@ -5,6 +5,9 @@ against the navigation database:
 - POST /api/route/validate - Validate route string and return resolved waypoints,
   FIR crossings, and unresolved identifiers.
 
+Uses the lightweight validate_route_string() which does simple first-match
+resolution without requiring flight plan context (origin/destination/flight_date).
+
 Validates Requirements: 3.1, 3.2, 3.3, 3.5
 """
 
@@ -45,9 +48,9 @@ async def validate_route(
 ) -> RouteValidationResponse | JSONResponse:
     """Validate an ICAO route string against the navigation database.
 
-    Resolves each waypoint identifier against reference tables, identifies
-    FIR crossings via PostGIS spatial analysis, and returns the full
-    validation result.
+    Uses lightweight validate_route_string() for simple first-match
+    waypoint resolution without flight plan context. No proximity
+    disambiguation or jump detection.
 
     - All waypoints resolved → 200, valid=true, unresolved=[]
     - Some waypoints unresolved → 200, valid=false, unresolved=[...]
@@ -66,15 +69,16 @@ async def validate_route(
     """
     route_parser = RouteParser()
 
-    # --- Parse route and resolve waypoints ---
+    # --- Validate route string (lightweight, no flight plan context) ---
     try:
-        waypoints = route_parser.parse_route(request.route_string, db)
+        token_result = route_parser.validate_route_string(
+            request.route_string, db
+        )
     except ParsingException as e:
         # Distinguish "empty route" from "no valid waypoints"
         unresolved = e.details.get("unresolved", []) if e.details else []
 
         if unresolved:
-            # No waypoints resolved at all → 400 with unresolved list
             logger.warning(
                 "Route validation failed – no valid waypoints",
                 extra={
@@ -90,7 +94,6 @@ async def validate_route(
                 },
             )
 
-        # Empty / whitespace route string
         logger.warning(
             "Route validation failed – empty route string",
             extra={"route_string": request.route_string, "error": e.message},
@@ -110,15 +113,8 @@ async def validate_route(
             content={"detail": "Internal server error"},
         )
 
-    # --- Collect unresolved identifiers ---
-    # parse_route only returns resolved waypoints; re-scan the tokens to find
-    # identifiers that were silently skipped (partial resolution case).
-    resolved_idents = {wp.identifier for wp in waypoints}
-    tokens = request.route_string.strip().upper().split()
-    unresolved = [
-        t for t in tokens
-        if t not in RouteParser.ROUTE_KEYWORDS and t not in resolved_idents
-    ]
+    waypoints = token_result.resolved_waypoints
+    unresolved = [tr.raw for tr in token_result.unresolved_tokens]
 
     # --- Identify FIR crossings (best-effort) ---
     try:

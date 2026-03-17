@@ -73,6 +73,9 @@ class AircraftResponse(BaseModel):
 class RouteValidationRequest(BaseModel):
     """Request schema for route string validation.
 
+    Only requires the route string. Validation uses lightweight
+    first-match resolution without flight plan context.
+
     Validates Requirements: 3.1, 3.2, 3.3
     """
 

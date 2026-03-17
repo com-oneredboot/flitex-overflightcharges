@@ -166,7 +166,7 @@ class TestCalculateRouteCost:
         # RouteParser
         p_parser = patch(_PARSER)
         mock_parser_cls = p_parser.start()
-        mock_parser_cls.return_value.parse_route_enhanced.return_value = _make_token_result()
+        mock_parser_cls.return_value.parse_route.return_value = _make_token_result()
         patches["parser"] = (p_parser, mock_parser_cls)
 
         # FIRIntersectionEngine
@@ -238,7 +238,7 @@ class TestCalculateRouteCost:
         """Test 400 response for invalid route string."""
         p_parser = patch(_PARSER)
         mock_parser_cls = p_parser.start()
-        mock_parser_cls.return_value.parse_route_enhanced.side_effect = ParsingException(
+        mock_parser_cls.return_value.parse_route.side_effect = ParsingException(
             "Invalid route format"
         )
         try:

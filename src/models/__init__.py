@@ -20,6 +20,12 @@ from src.models.reference import (
 )
 from src.models.ai_review_session import AIReviewSession
 from src.models.ai_chat_message import AIChatMessage
+from src.models.qa import (
+    QAFlightPlan,
+    QATestRun,
+    QATestRunResult,
+    QATestRunReview,
+)
 
 __all__ = [
     "IataFir",
@@ -41,4 +47,8 @@ __all__ = [
     "ReferenceFIRBoundary",
     "AIReviewSession",
     "AIChatMessage",
+    "QAFlightPlan",
+    "QATestRun",
+    "QATestRunResult",
+    "QATestRunReview",
 ]

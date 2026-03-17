@@ -226,7 +226,7 @@ async def calculate_route_cost(
         # 1. Enhanced Route Parser → TokenResolutionResult
         # ------------------------------------------------------------------
         route_parser = RouteParser()
-        token_result = route_parser.parse_route_enhanced(
+        token_result = route_parser.parse_route(
             route_string=request.route_string,
             origin=request.origin,
             destination=request.destination,

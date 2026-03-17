@@ -30,7 +30,6 @@ from src.models.reference import (
     ReferenceChargesNDB,
     ReferenceFIRBoundary,
 )
-from src.models.token_action_reason import TokenActionReason
 from src.schemas.reference import FIRCrossing
 
 logger = logging.getLogger(__name__)
@@ -114,57 +113,139 @@ class RouteParser:
     # Pattern for NAT track codes (e.g., NATW, NATA)
     _NAT_PATTERN = re.compile(r"^NAT[A-Z]$")
 
-    def _is_airway_designator(self, token: str) -> bool:
-        """Check if token matches airway designator pattern.
+    # Pattern for airport+runway tokens (e.g., EGLLR09L, KIAHR27, KORDR10L)
+    # Format: 4-char ICAO code + 'R' + runway designator (2-3 chars)
+    _AIRPORT_RUNWAY_PATTERN = re.compile(r"^([A-Z]{4})R(\d{2}[LCR]?)$")
 
-        Airway designators are 3-5 characters long, contain at least one digit,
-        and are NOT NAT track codes (e.g., NATW, NATA).
+    # ICAO speed/level group: speed (N/K + 4 digits or M + 3 digits) + level (F/A + 3 digits, S/M + 4 digits, or VFR)
+    # Examples: N0454F260, M082F330, K0830A045, N0460VFR
+    _SPEED_LEVEL_PATTERN = re.compile(
+        r"^(?:[NK]\d{4}|M\d{3})(?:F\d{3}|A\d{3}|S\d{4}|M\d{4}|VFR)$"
+    )
 
-        Examples of airways: J174, UL9, N562A, A1, UM860
-        Examples of non-airways: NATW (NAT track), DCT (keyword), MERIT (waypoint)
+    # ATS route designator pattern: covers airways, SIDs, and STARs (2-7 chars total)
+    # Airways: 1-2 letter prefix + 1-4 digits + optional trailing letter (B1, J60, N14, UL613, UT225, N518A)
+    # SIDs: waypoint name + digit + optional letter (ATREX5G, KODAP2A)
+    # STARs: waypoint name + digit (FLOSI4)
+    # Common trait: always contains at least one digit, 2-7 chars, mix of letters and digits
+    _ATS_ROUTE_PATTERN = re.compile(r"^[A-Z]{1,2}\d{1,4}[A-Z]?$")
+    _SID_STAR_PATTERN = re.compile(r"^[A-Z]{2,5}\d[A-Z]?$")
+
+    def _is_speed_level_group(self, token: str) -> bool:
+        """Check if token is an ICAO speed/level group.
+
+        Speed/level groups appear as the first token in Item 15 (initial cruise)
+        and after '/' in speed/level change tokens. Format is speed + level
+        concatenated without space.
+
+        Examples: N0454F260, M082F330, K0830A045
 
         Args:
             token: Uppercased route token to check.
 
         Returns:
-            True if the token matches the airway designator pattern.
+            True if the token matches speed/level group pattern.
+        """
+        return bool(self._SPEED_LEVEL_PATTERN.match(token))
+
+    def _is_airway_designator(self, token: str) -> bool:
+        """Check if token matches ATS route designator pattern.
+
+        Per ICAO Doc 4444, ATS route designators are 2-7 characters and include
+        airways (B1, J60, UL613, UT225, N518A), SID procedures (ATREX5G),
+        and STAR procedures (FLOSI4). They always contain at least one digit
+        and are NOT NAT track codes.
+
+        Args:
+            token: Uppercased route token to check.
+
+        Returns:
+            True if the token matches the ATS route designator pattern.
 
         Validates: Requirements 1.1
         """
-        if not 3 <= len(token) <= 5:
-            return False
-        if not any(ch.isdigit() for ch in token):
+        if not 2 <= len(token) <= 7:
             return False
         if self._NAT_PATTERN.match(token):
             return False
-        return True
+        # Match airway pattern (letter prefix + digits + optional letter)
+        # or SID/STAR pattern (waypoint name + digit + optional transition letter)
+        return bool(self._ATS_ROUTE_PATTERN.match(token) or self._SID_STAR_PATTERN.match(token))
+
+    def _extract_speed_change_waypoint(self, token: str) -> str | None:
+        """Extract waypoint name from a speed/level change token.
+
+        ICAO speed/level change format: WAYPOINT/SPEEDLEVEL
+        e.g. VESAN/N0457F300 → VESAN, RESNO/M080F360 → RESNO
+
+        Also handles lat/lon coordinate changes:
+        e.g. 4602N07805W/N0500F350 → None (handled by lat/lon parser)
+
+        Args:
+            token: Uppercased route token containing '/'.
+
+        Returns:
+            Waypoint identifier (left of '/') if right side is a speed/level
+            group, None otherwise (token may be a lat/lon coordinate).
+        """
+        if "/" not in token:
+            return None
+        parts = token.split("/", 1)
+        if len(parts) != 2:
+            return None
+        waypoint_part, speed_level_part = parts
+        if self._is_speed_level_group(speed_level_part) and waypoint_part:
+            return waypoint_part
+        return None
 
     def _classify_token(self, token: str) -> str:
         """Classify a route token into its type category.
 
-        Classification follows the pipeline order defined in the design:
+        Classification follows the ICAO Item 15 element pipeline:
         1. Keyword check — DCT, SID, STAR, DIRECT, AIRWAY
-        2. Airway detection — 3-5 char tokens containing digits, excluding NAT codes
-        3. NAT track detection — tokens matching NAT[A-Z]
-        4. Lat/lon coordinate — tokens matching DDMMN/DDDMME pattern
-        5. Otherwise — treated as a waypoint candidate
+        2. Speed/level group — N0454F260, M082F330 (initial cruise or standalone)
+        3. Speed/level change — VESAN/N0457F300 (waypoint + speed/level after /)
+        4. Airway/SID/STAR detection — 2-7 char ATS route designators with digits
+        5. NAT track detection — tokens matching NAT[A-Z]
+        6. Airport+runway detection — ICAO code + runway designator (e.g. EGLLR09L)
+        7. Lat/lon coordinate — DDMMN/DDDMME, DDN DDDW, DDMMNDDDMMW, DDMMSSNDDDMMSSW
+        8. Bare speed/level fragment — /N0000F350 (continuation without waypoint)
+        9. Otherwise — treated as a waypoint candidate
 
         Args:
             token: Uppercased route token to classify.
 
         Returns:
-            Classification string: 'keyword', 'airway', 'nat_track',
-            'coordinate', or 'waypoint'.
+            Classification string: 'keyword', 'speed_level', 'speed_change',
+            'airway', 'nat_track', 'airport_runway', 'coordinate', or 'waypoint'.
 
         Validates: Requirements 1.1, 1.2, 1.3
         """
         if token in self.ROUTE_KEYWORDS:
             return "keyword"
+        if self._is_speed_level_group(token):
+            return "speed_level"
+        if "/" in token:
+            # Bare speed/level fragment (e.g., /N0000F350, /M083F320)
+            if token.startswith("/") and self._is_speed_level_group(token[1:]):
+                return "speed_level"
+            if self._extract_speed_change_waypoint(token) is not None:
+                return "speed_change"
+            # Fall through to coordinate check
+            return "coordinate"
         if self._is_airway_designator(token):
             return "airway"
         if self._NAT_PATTERN.match(token):
             return "nat_track"
-        if "/" in token:
+        # Check airport+runway format (e.g., EGLLR09L, KIAHR27)
+        if self._AIRPORT_RUNWAY_PATTERN.match(token):
+            return "airport_runway"
+        # Check compact lat/lon formats (no slash):
+        # DDN DDDW (e.g., 62N020W), DDMMNDDDMMW (e.g., 5630N02000W),
+        # DDMMSSNDDDMMSSW (e.g., 533436N0832530W)
+        if (self._LATLON_COMPACT_PATTERN.match(token)
+                or self._LATLON_DEGMIN_COMPACT_PATTERN.match(token)
+                or self._LATLON_DMS_COMPACT_PATTERN.match(token)):
             return "coordinate"
         return "waypoint"
 
@@ -229,17 +310,25 @@ class RouteParser:
         flight_dt = datetime.combine(flight_date, datetime.min.time())
 
         try:
-            row = db.execute(
-                text(
-                    'SELECT route FROM plans."NATs" '
-                    "WHERE track_id = :track_id "
-                    "AND valid_from <= :flight_dt "
-                    "AND valid_to >= :flight_dt "
-                    "ORDER BY valid_from DESC "
-                    "LIMIT 1"
-                ),
-                {"track_id": token, "flight_dt": flight_dt},
-            ).fetchone()
+            # Use a SAVEPOINT so a failure here (e.g. table doesn't exist)
+            # does not poison the outer transaction.
+            nested = db.begin_nested()
+            try:
+                row = db.execute(
+                    text(
+                        'SELECT route FROM plans."NATs" '
+                        "WHERE track_id = :track_id "
+                        "AND valid_from <= :flight_dt "
+                        "AND valid_to >= :flight_dt "
+                        "ORDER BY valid_from DESC "
+                        "LIMIT 1"
+                    ),
+                    {"track_id": token, "flight_dt": flight_dt},
+                ).fetchone()
+                nested.commit()
+            except Exception:
+                nested.rollback()
+                raise
         except Exception as e:
             logger.warning(
                 "NAT track lookup failed for %s on %s: %s",
@@ -281,132 +370,144 @@ class RouteParser:
         r"^(\d{2})(\d{2})([NS])/(\d{3})(\d{2})([EW])$"
     )
 
-    def _parse_lat_lon(self, token: str) -> tuple[float, float] | None:
-        """Parse ICAO lat/lon format (e.g., 5000N/04900W) to (lat, lon) decimal.
+    # Compact lat/lon format without slash or minutes: DDN DDDW (e.g., 62N020W, 55N085W)
+    _LATLON_COMPACT_PATTERN = re.compile(
+        r"^(\d{2})([NS])(\d{3})([EW])$"
+    )
 
-        ICAO format: DDMMN/DDDMME where:
-        - DD = degrees latitude (00-90)
-        - MM = minutes latitude (00-59)
-        - N/S = hemisphere
-        - DDD = degrees longitude (000-180)
-        - MM = minutes longitude (00-59)
-        - E/W = hemisphere
+    # Degrees+minutes compact (no slash): DDMMNDDDMMW (e.g., 5630N02000W = 56°30'N 020°00'W)
+    _LATLON_DEGMIN_COMPACT_PATTERN = re.compile(
+        r"^(\d{2})(\d{2})([NS])(\d{3})(\d{2})([EW])$"
+    )
+
+    # Degrees+minutes+seconds compact: DDMMSSNDDDMMSSW (e.g., 533436N0832530W)
+    _LATLON_DMS_COMPACT_PATTERN = re.compile(
+        r"^(\d{2})(\d{2})(\d{2})([NS])(\d{3})(\d{2})(\d{2})([EW])$"
+    )
+
+    def _parse_lat_lon(self, token: str) -> tuple[float, float] | None:
+        """Parse ICAO lat/lon format to (lat, lon) decimal.
+
+        Supports four formats per ICAO Doc 4444 Item 15:
+        1. Full ICAO: DDMMN/DDDMME (e.g., 5000N/04900W)
+        2. Compact degrees-only: DDN DDDW (e.g., 62N020W, 55N085W)
+        3. Compact degrees+minutes: DDMMNDDDMMW (e.g., 5630N02000W = 56°30'N 020°00'W)
+        4. Compact degrees+minutes+seconds: DDMMSSNDDDMMSSW (e.g., 533436N0832530W)
 
         Args:
             token: Uppercased route token to parse.
 
         Returns:
             Tuple of (latitude, longitude) in decimal degrees, or None if
-            the token does not match the ICAO lat/lon format or contains
+            the token does not match any ICAO lat/lon format or contains
             invalid values.
 
         Validates: Requirements 4.1, 4.2, 4.3
         """
+        # Try full format first: DDMMN/DDDMME
         match = self._LATLON_PATTERN.match(token)
-        if not match:
-            return None
+        if match:
+            lat_deg = int(match.group(1))
+            lat_min = int(match.group(2))
+            lat_hem = match.group(3)
+            lon_deg = int(match.group(4))
+            lon_min = int(match.group(5))
+            lon_hem = match.group(6)
 
-        lat_deg = int(match.group(1))
-        lat_min = int(match.group(2))
-        lat_hem = match.group(3)
-        lon_deg = int(match.group(4))
-        lon_min = int(match.group(5))
-        lon_hem = match.group(6)
+            if lat_min > 59 or lon_min > 59:
+                return None
 
-        # Validate minutes range
-        if lat_min > 59 or lon_min > 59:
-            return None
+            lat = lat_deg + lat_min / 60.0
+            lon = lon_deg + lon_min / 60.0
 
-        lat = lat_deg + lat_min / 60.0
-        lon = lon_deg + lon_min / 60.0
+            if lat_hem == "S":
+                lat = -lat
+            if lon_hem == "W":
+                lon = -lon
 
-        if lat_hem == "S":
-            lat = -lat
-        if lon_hem == "W":
-            lon = -lon
+            if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                return None
 
-        # Validate ranges: latitude ±90, longitude ±180
-        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
-            return None
+            return (lat, lon)
 
-        return (lat, lon)
+        # Try compact format: DDN DDDW (e.g., 62N020W)
+        compact_match = self._LATLON_COMPACT_PATTERN.match(token)
+        if compact_match:
+            lat_deg = int(compact_match.group(1))
+            lat_hem = compact_match.group(2)
+            lon_deg = int(compact_match.group(3))
+            lon_hem = compact_match.group(4)
+
+            lat = float(lat_deg)
+            lon = float(lon_deg)
+
+            if lat_hem == "S":
+                lat = -lat
+            if lon_hem == "W":
+                lon = -lon
+
+            if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                return None
+
+            return (lat, lon)
+
+        # Try degrees+minutes compact (no slash): DDMMNDDDMMW (e.g., 5630N02000W)
+        degmin_match = self._LATLON_DEGMIN_COMPACT_PATTERN.match(token)
+        if degmin_match:
+            lat_deg = int(degmin_match.group(1))
+            lat_min = int(degmin_match.group(2))
+            lat_hem = degmin_match.group(3)
+            lon_deg = int(degmin_match.group(4))
+            lon_min = int(degmin_match.group(5))
+            lon_hem = degmin_match.group(6)
+
+            if lat_min > 59 or lon_min > 59:
+                return None
+
+            lat = lat_deg + lat_min / 60.0
+            lon = lon_deg + lon_min / 60.0
+
+            if lat_hem == "S":
+                lat = -lat
+            if lon_hem == "W":
+                lon = -lon
+
+            if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                return None
+
+            return (lat, lon)
+
+        # Try degrees+minutes+seconds compact: DDMMSSNDDDMMSSW (e.g., 533436N0832530W)
+        dms_match = self._LATLON_DMS_COMPACT_PATTERN.match(token)
+        if dms_match:
+            lat_deg = int(dms_match.group(1))
+            lat_min = int(dms_match.group(2))
+            lat_sec = int(dms_match.group(3))
+            lat_hem = dms_match.group(4)
+            lon_deg = int(dms_match.group(5))
+            lon_min = int(dms_match.group(6))
+            lon_sec = int(dms_match.group(7))
+            lon_hem = dms_match.group(8)
+
+            if lat_min > 59 or lon_min > 59 or lat_sec > 59 or lon_sec > 59:
+                return None
+
+            lat = lat_deg + lat_min / 60.0 + lat_sec / 3600.0
+            lon = lon_deg + lon_min / 60.0 + lon_sec / 3600.0
+
+            if lat_hem == "S":
+                lat = -lat
+            if lon_hem == "W":
+                lon = -lon
+
+            if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+                return None
+
+            return (lat, lon)
+
+        return None
 
 
-    def parse_route(self, route_string: str, db: Session) -> List[Waypoint]:
-        """Parse ICAO route string into waypoints resolved against the navigation database.
-        
-        Parses an ICAO-formatted route string and resolves each identifier against
-        the reference schema tables. Route keywords (DCT, SID, STAR, DIRECT, AIRWAY)
-        are skipped. Unresolved identifiers are collected and returned via
-        ParsingException if no waypoints resolve, or silently skipped if some do.
-        
-        Args:
-            route_string: ICAO formatted route (e.g., "KJFK DCT CYYZ")
-            db: SQLAlchemy database session for querying reference tables
-        
-        Returns:
-            List of Waypoint objects with coordinates and source_table
-        
-        Raises:
-            ParsingException: If route format is invalid or no waypoints can be resolved.
-                When some identifiers are unresolved, the exception details include
-                an 'unresolved' key listing them.
-        
-        Validates: Requirements 3.1, 3.2, 3.3, 3.4
-        
-        Example:
-            >>> parser = RouteParser()
-            >>> waypoints = parser.parse_route("KJFK DCT CYYZ", db)
-            >>> len(waypoints)
-            2
-        """
-        if not route_string or not route_string.strip():
-            raise ParsingException(
-                "Route string cannot be empty",
-                details={"route_string": route_string}
-            )
-        
-        # Split route string into tokens
-        tokens = route_string.strip().upper().split()
-        
-        if not tokens:
-            raise ParsingException(
-                "Route string must contain at least one waypoint",
-                details={"route_string": route_string}
-            )
-        
-        waypoints: List[Waypoint] = []
-        unresolved: List[str] = []
-        
-        for token in tokens:
-            # Skip route keywords
-            if token in self.ROUTE_KEYWORDS:
-                continue
-            
-            # Resolve against navigation database
-            result = self._resolve_waypoint_coordinates(token, db)
-            
-            if result:
-                waypoints.append(Waypoint(
-                    identifier=token,
-                    latitude=result["latitude"],
-                    longitude=result["longitude"],
-                    source_table=result["source_table"],
-                ))
-            else:
-                unresolved.append(token)
-        
-        if not waypoints:
-            raise ParsingException(
-                "No valid waypoints found in route string",
-                details={
-                    "route_string": route_string,
-                    "tokens": tokens,
-                    "unresolved": unresolved,
-                }
-            )
-        
-        return waypoints
     
     def identify_fir_crossings(
         self,
@@ -518,16 +619,22 @@ class RouteParser:
 
         for waypoint in waypoints:
             try:
-                row = db.execute(
-                    text(
-                        "SELECT icao_code, fir_name, country "
-                        "FROM reference.fir_boundaries "
-                        "WHERE geometry IS NOT NULL "
-                        "AND ST_Contains(geometry, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)) "
-                        "LIMIT 1"
-                    ),
-                    {"lon": waypoint.longitude, "lat": waypoint.latitude},
-                ).fetchone()
+                nested = db.begin_nested()
+                try:
+                    row = db.execute(
+                        text(
+                            "SELECT icao_code, fir_name, country "
+                            "FROM reference.fir_boundaries "
+                            "WHERE geometry IS NOT NULL "
+                            "AND ST_Contains(geometry, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)) "
+                            "LIMIT 1"
+                        ),
+                        {"lon": waypoint.longitude, "lat": waypoint.latitude},
+                    ).fetchone()
+                    nested.commit()
+                except Exception:
+                    nested.rollback()
+                    raise
 
                 if row and row[0] and row[0] not in seen_codes:
                     icao_code = str(row[0])
@@ -585,7 +692,16 @@ class RouteParser:
         ]
 
         for model_cls, table_name in lookup_order:
-            record = db.query(model_cls).filter(model_cls.ident == identifier).first()
+            try:
+                nested = db.begin_nested()
+                try:
+                    record = db.query(model_cls).filter(model_cls.ident == identifier).first()
+                    nested.commit()
+                except Exception:
+                    nested.rollback()
+                    raise
+            except Exception:
+                continue
             if record and record.laty is not None and record.lonx is not None:
                 return {
                     "latitude": record.laty,
@@ -662,7 +778,15 @@ class RouteParser:
 
         for model_cls, table_name in lookup_order:
             try:
-                records = db.query(model_cls).filter(model_cls.ident == identifier).all()
+                # Use a SAVEPOINT so a failure here (e.g. table doesn't exist)
+                # does not poison the outer transaction.
+                nested = db.begin_nested()
+                try:
+                    records = db.query(model_cls).filter(model_cls.ident == identifier).all()
+                    nested.commit()
+                except Exception:
+                    nested.rollback()
+                    raise
             except Exception as exc:
                 logger.warning(
                     "Proximity query failed for %s in %s: %s",
@@ -776,8 +900,238 @@ class RouteParser:
         result["trimmed_to"] = trimmed
         return result
 
+    def validate_route_string(self, route_string: str, db: Session) -> TokenResolutionResult:
+        """Lightweight route string validation without flight plan context.
 
-    def parse_route_enhanced(
+        Parses and validates an ICAO route string by classifying each token
+        and resolving waypoints using simple first-match lookup. Does NOT
+        require origin/destination/flight_date and does NOT use proximity
+        disambiguation or jump detection.
+
+        Intended for:
+        - Route string validation in the overflight charges wizard (Step 1)
+        - QA test harness route string testing
+
+        For full flight plan parsing with contextual disambiguation, use
+        parse_route() instead.
+
+        Args:
+            route_string: ICAO formatted route string.
+            db: SQLAlchemy database session.
+
+        Returns:
+            TokenResolutionResult with token records, resolved waypoints,
+            unresolved tokens, and route linestring coordinates.
+
+        Raises:
+            ParsingException: If route string is empty or whitespace-only.
+        """
+        if not route_string or not route_string.strip():
+            raise ParsingException(
+                "Route string cannot be empty",
+                details={"route_string": route_string or ""},
+            )
+
+        raw_tokens = route_string.strip().upper().split()
+
+        token_records: list[TokenRecord] = []
+        resolved_waypoints: list[Waypoint] = []
+        unresolved_tokens: list[TokenRecord] = []
+        route_coords: list[tuple[float, float]] = []
+
+        for raw_token in raw_tokens:
+            classification = self._classify_token(raw_token)
+
+            # 1. Keyword → skip
+            if classification == "keyword":
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="keyword",
+                    action="skipped", reason_code="KEYWORD_SKIPPED",
+                ))
+                continue
+
+            # 2. Speed/level group → skip
+            if classification == "speed_level":
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="speed_level",
+                    action="skipped", reason_code="SPEED_LEVEL_SKIPPED",
+                ))
+                continue
+
+            # 3. Speed/level change → extract waypoint and resolve (simple)
+            if classification == "speed_change":
+                waypoint_name = self._extract_speed_change_waypoint(raw_token)
+                if waypoint_name:
+                    # Try coordinate parse first (e.g., 50N091W/N0000F230)
+                    coord_parsed = self._parse_lat_lon(waypoint_name)
+                    if coord_parsed:
+                        lat, lon = coord_parsed
+                        token_records.append(TokenRecord(
+                            raw=raw_token, classification="speed_change",
+                            action="resolved", reason_code="SPEED_CHANGE_COORDINATE_PARSED",
+                            resolved_lat=lat, resolved_lon=lon,
+                        ))
+                        resolved_waypoints.append(Waypoint(
+                            identifier=waypoint_name,
+                            latitude=lat, longitude=lon,
+                            source_table="coordinate",
+                        ))
+                        route_coords.append((lon, lat))
+                        continue
+                    # Fall back to DB lookup for named waypoints
+                    result = self._resolve_waypoint_coordinates(waypoint_name, db)
+                    if result:
+                        token_records.append(TokenRecord(
+                            raw=raw_token, classification="speed_change",
+                            action="resolved", reason_code="SPEED_CHANGE_WAYPOINT_RESOLVED",
+                            source_table=result["source_table"],
+                            resolved_lat=result["latitude"],
+                            resolved_lon=result["longitude"],
+                        ))
+                        resolved_waypoints.append(Waypoint(
+                            identifier=waypoint_name,
+                            latitude=result["latitude"],
+                            longitude=result["longitude"],
+                            source_table=result["source_table"],
+                        ))
+                        route_coords.append((result["longitude"], result["latitude"]))
+                        continue
+                    record = TokenRecord(
+                        raw=raw_token, classification="speed_change",
+                        action="unresolved", reason_code="SPEED_CHANGE_WAYPOINT_NOT_FOUND",
+                    )
+                    token_records.append(record)
+                    unresolved_tokens.append(record)
+                    continue
+
+            # 4. Airway → skip
+            if classification == "airway":
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="airway",
+                    action="skipped", reason_code="AIRWAY_DESIGNATOR",
+                ))
+                continue
+
+            # 5. NAT track → record as skipped (no flight_date for expansion)
+            if classification == "nat_track":
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="nat_track",
+                    action="skipped", reason_code="NAT_TRACK_SKIPPED_NO_DATE",
+                ))
+                continue
+
+            # 6. Airport+runway → extract ICAO and resolve
+            if classification == "airport_runway":
+                match = self._AIRPORT_RUNWAY_PATTERN.match(raw_token)
+                if match:
+                    icao = match.group(1)
+                    result = self._resolve_waypoint_coordinates(icao, db)
+                    if result:
+                        token_records.append(TokenRecord(
+                            raw=raw_token, classification="airport_runway",
+                            action="resolved", reason_code="AIRPORT_RUNWAY_RESOLVED",
+                            source_table=result["source_table"],
+                            resolved_lat=result["latitude"],
+                            resolved_lon=result["longitude"],
+                        ))
+                        resolved_waypoints.append(Waypoint(
+                            identifier=icao,
+                            latitude=result["latitude"],
+                            longitude=result["longitude"],
+                            source_table=result["source_table"],
+                        ))
+                        route_coords.append((result["longitude"], result["latitude"]))
+                        continue
+                    record = TokenRecord(
+                        raw=raw_token, classification="airport_runway",
+                        action="unresolved", reason_code="AIRPORT_RUNWAY_NOT_FOUND",
+                    )
+                    token_records.append(record)
+                    unresolved_tokens.append(record)
+                    continue
+
+            # 7. Coordinate → parse lat/lon
+            if classification == "coordinate":
+                parsed = self._parse_lat_lon(raw_token)
+                if parsed:
+                    lat, lon = parsed
+                    token_records.append(TokenRecord(
+                        raw=raw_token, classification="coordinate",
+                        action="resolved", reason_code="COORDINATE_PARSED",
+                        resolved_lat=lat, resolved_lon=lon,
+                    ))
+                    resolved_waypoints.append(Waypoint(
+                        identifier=raw_token, latitude=lat, longitude=lon,
+                        source_table="coordinate",
+                    ))
+                    route_coords.append((lon, lat))
+                else:
+                    record = TokenRecord(
+                        raw=raw_token, classification="coordinate",
+                        action="unresolved", reason_code="INVALID_COORDINATE_VALUES",
+                    )
+                    token_records.append(record)
+                    unresolved_tokens.append(record)
+                continue
+
+            # 8. Waypoint → simple first-match resolution + SID/STAR fallback
+            result = self._resolve_waypoint_coordinates(raw_token, db)
+            if result:
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="waypoint",
+                    action="resolved", reason_code="WAYPOINT_RESOLVED",
+                    source_table=result["source_table"],
+                    resolved_lat=result["latitude"],
+                    resolved_lon=result["longitude"],
+                ))
+                resolved_waypoints.append(Waypoint(
+                    identifier=raw_token,
+                    latitude=result["latitude"],
+                    longitude=result["longitude"],
+                    source_table=result["source_table"],
+                ))
+                route_coords.append((result["longitude"], result["latitude"]))
+                continue
+
+            # SID/STAR fallback — use (0,0) as dummy reference since no proximity needed
+            sid_star_result = self._try_sid_star_strip(raw_token, (0.0, 0.0), db)
+            if sid_star_result:
+                token_records.append(TokenRecord(
+                    raw=raw_token, classification="waypoint",
+                    action="resolved", reason_code="SID_STAR_SUFFIX_STRIPPED",
+                    source_table=sid_star_result["source_table"],
+                    resolved_lat=sid_star_result["latitude"],
+                    resolved_lon=sid_star_result["longitude"],
+                    original_token=sid_star_result["original_token"],
+                    trimmed_to=sid_star_result["trimmed_to"],
+                ))
+                resolved_waypoints.append(Waypoint(
+                    identifier=sid_star_result["trimmed_to"],
+                    latitude=sid_star_result["latitude"],
+                    longitude=sid_star_result["longitude"],
+                    source_table=sid_star_result["source_table"],
+                ))
+                route_coords.append((sid_star_result["longitude"], sid_star_result["latitude"]))
+                continue
+
+            # Completely unresolved
+            record = TokenRecord(
+                raw=raw_token, classification="waypoint",
+                action="unresolved", reason_code="WAYPOINT_NOT_FOUND",
+            )
+            token_records.append(record)
+            unresolved_tokens.append(record)
+
+        return TokenResolutionResult(
+            tokens=token_records,
+            resolved_waypoints=resolved_waypoints,
+            unresolved_tokens=unresolved_tokens,
+            route_linestring_coords=route_coords,
+        )
+
+
+
+    def parse_route(
         self,
         route_string: str,
         origin: str,
@@ -808,29 +1162,6 @@ class RouteParser:
 
         Validates: Requirements 1.1, 1.2, 2.1, 3.4, 4.1, 5.1, 6.1, 10.3, 10.4, 10.5, 20.4
         """
-        # Load reason codes from reference table for validation (non-fatal if table missing)
-        reason_codes: dict = {}
-        try:
-            nested = db.begin_nested()
-            try:
-                reason_codes = {
-                    r.reason_code: r
-                    for r in db.query(TokenActionReason).all()
-                }
-                nested.commit()
-                logger.info(
-                    "Loaded %d token action reason codes from database",
-                    len(reason_codes),
-                )
-            except Exception:
-                nested.rollback()
-                raise
-        except Exception as e:
-            logger.warning(
-                "Could not load token action reason codes (table may not exist): %s",
-                str(e),
-            )
-
         # Resolve origin and destination airport coordinates.
         # These are always included as the first and last route coordinates
         # to guarantee at least 2 points for FIR intersection, even when
@@ -890,6 +1221,88 @@ class RouteParser:
                 )
                 token_records.append(record)
                 continue
+
+            # 1b. Speed/level group → skip (e.g. N0454F260, M082F330)
+            if classification == "speed_level":
+                record = TokenRecord(
+                    raw=raw_token,
+                    classification="speed_level",
+                    action="skipped",
+                    reason_code="SPEED_LEVEL_SKIPPED",
+                )
+                token_records.append(record)
+                continue
+
+            # 1c. Speed/level change → extract waypoint and resolve (e.g. VESAN/N0457F300)
+            if classification == "speed_change":
+                waypoint_name = self._extract_speed_change_waypoint(raw_token)
+                if waypoint_name:
+                    # Try coordinate parse first (e.g., 50N091W/N0000F230)
+                    coord_parsed = self._parse_lat_lon(waypoint_name)
+                    if coord_parsed:
+                        lat, lon = coord_parsed
+                        record = TokenRecord(
+                            raw=raw_token,
+                            classification="speed_change",
+                            action="resolved",
+                            reason_code="SPEED_CHANGE_COORDINATE_PARSED",
+                            resolved_lat=lat,
+                            resolved_lon=lon,
+                        )
+                        token_records.append(record)
+                        waypoint = Waypoint(
+                            identifier=waypoint_name,
+                            latitude=lat,
+                            longitude=lon,
+                            source_table="coordinate",
+                        )
+                        resolved_waypoints.append(waypoint)
+                        route_coords.append((lon, lat))
+                        reference_point = (lat, lon)
+                        continue
+                    # Fall back to proximity-based DB lookup for named waypoints
+                    candidates = self._resolve_with_proximity(
+                        waypoint_name, reference_point, db
+                    )
+                    if candidates:
+                        selected, discarded = self._apply_jump_detection(
+                            candidates, reference_point
+                        )
+                        if selected:
+                            record = TokenRecord(
+                                raw=raw_token,
+                                classification="speed_change",
+                                action="resolved",
+                                reason_code="SPEED_CHANGE_WAYPOINT_RESOLVED",
+                                source_table=selected["source_table"],
+                                resolved_lat=selected["latitude"],
+                                resolved_lon=selected["longitude"],
+                                alternatives_count=len(candidates),
+                                disambiguation_distance_nm=selected.get("distance_nm"),
+                            )
+                            token_records.append(record)
+                            waypoint = Waypoint(
+                                identifier=waypoint_name,
+                                latitude=selected["latitude"],
+                                longitude=selected["longitude"],
+                                source_table=selected["source_table"],
+                            )
+                            resolved_waypoints.append(waypoint)
+                            route_coords.append(
+                                (selected["longitude"], selected["latitude"])
+                            )
+                            reference_point = (selected["latitude"], selected["longitude"])
+                            continue
+                    # Waypoint from speed change not found
+                    record = TokenRecord(
+                        raw=raw_token,
+                        classification="speed_change",
+                        action="unresolved",
+                        reason_code="SPEED_CHANGE_WAYPOINT_NOT_FOUND",
+                    )
+                    token_records.append(record)
+                    unresolved_tokens.append(record)
+                    continue
 
             # 2. Airway → skip
             if classification == "airway":
