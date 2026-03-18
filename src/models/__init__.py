@@ -8,6 +8,7 @@ from src.models.token_action_reason import TokenActionReason
 from src.models.overflight_calculation_session import OverflightCalculationSession
 from src.models.overflight_charges_anomaly import OverflightChargesAnomaly
 from src.models.flights_flown_data import FlightsFlownData
+from src.models.flights_flown_loaded import FlightsFlownLoaded
 from src.models.invoice import Invoice, FIREntry
 from src.models.reference import (
     ReferenceAirport,
@@ -36,6 +37,7 @@ __all__ = [
     "OverflightCalculationSession",
     "OverflightChargesAnomaly",
     "FlightsFlownData",
+    "FlightsFlownLoaded",
     "Invoice",
     "FIREntry",
     "ReferenceAirport",

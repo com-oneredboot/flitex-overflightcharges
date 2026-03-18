@@ -7,7 +7,7 @@ The table is owned/populated by the flights-flown-ingestion service.
 
 import uuid
 
-from sqlalchemy import Column, Date, Integer, Numeric, String
+from sqlalchemy import Column, Date, ForeignKey, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.database import Base
@@ -36,6 +36,12 @@ class FlightsFlownData(Base):
     distance = Column(Integer, nullable=True)
     cost = Column(Numeric(10, 2), nullable=True)
     user_number = Column(String(50), nullable=True)
+    load_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("flights_flown_loaded.id"),
+        nullable=True,
+        index=True,
+    )
 
     def __repr__(self) -> str:
         return (

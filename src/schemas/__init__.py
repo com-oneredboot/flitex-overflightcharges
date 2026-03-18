@@ -26,6 +26,12 @@ from src.schemas.flown_search import (
     FlownRecordResponse,
     FlownSearchResponse,
 )
+from src.schemas.flights_flown import (
+    FlightsFlownLoadedResponse,
+    FlightsFlownLoadedListResponse,
+    FlightsFlownDataResponse,
+    FlightsFlownDataListResponse,
+)
 from src.schemas.summary_review import (
     Finding,
     AIReviewResult,
@@ -65,4 +71,8 @@ __all__ = [
     "GenerateReviewResponse",
     "ChatRequest",
     "ChatResponse",
+    "FlightsFlownLoadedResponse",
+    "FlightsFlownLoadedListResponse",
+    "FlightsFlownDataResponse",
+    "FlightsFlownDataListResponse",
 ]
